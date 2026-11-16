@@ -1,0 +1,160 @@
+<title>Palette Roll</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: thin toolbar on top, five full-height swatch columns fill the rest (rows on phones) */
+:root {
+  --bg: #f6f5f8;
+  --ink: #1d1b24;
+  --muted: #6c6878;
+  --line: #dddae4;
+  --btn: #1d1b24;
+  --btn-ink: #f6f5f8;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15141a; --ink: #ecebf2; --muted: #9a96a8; --line: #2c2a35;
+    --btn: #ecebf2; --btn-ink: #15141a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15141a; --ink: #ecebf2; --muted: #9a96a8; --line: #2c2a35;
+  --btn: #ecebf2; --btn-ink: #15141a; color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--display);
+  display: flex; flex-direction: column;
+}
+header {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding-block: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.scheme { font-family: var(--mono); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.spacer { flex: 1; }
+.hint { font-size: 13px; color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+#generate {
+  font: 600 15px var(--display); background: var(--btn); color: var(--btn-ink);
+  border: 0; border-radius: 999px; padding: 10px 20px; cursor: pointer;
+}
+#generate:focus-visible, .swatch:focus-visible, .hex:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+main { flex: 1; display: flex; min-height: 0; }
+.swatch {
+  flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start;
+  gap: 6px; padding: 20px 16px; cursor: pointer; border: 0; text-align: left;
+  transition: background-color 0.35s ease, flex 0.3s ease;
+}
+.swatch:hover { flex: 1.15; }
+.hex {
+  font: 500 clamp(15px, 2vw, 22px) var(--mono); background: none; border: 0; padding: 2px 0;
+  color: inherit; cursor: copy; text-transform: uppercase;
+}
+.hsl { font: 500 11px var(--mono); opacity: 0.7; }
+.lock { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.55; }
+.swatch[aria-pressed="true"] .lock { opacity: 1; }
+#toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%); background: var(--btn); color: var(--btn-ink);
+  font: 500 13px var(--mono); padding: 8px 14px; border-radius: 6px;
+}
+@media (max-width: 640px) {
+  .hint { display: none; }
+  main { flex-direction: column; }
+  .swatch { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .swatch { transition: none; } }
+</style>
+
+<header>
+  <h1>Palette Roll</h1>
+  <span class="scheme" id="scheme">analogous</span>
+  <span class="spacer"></span>
+  <span class="hint">Press <kbd>Space</kbd> for a new palette · click a color to lock it</span>
+  <button id="generate" type="button">Generate</button>
+</header>
+<main id="swatches"></main>
+<div id="toast" hidden>Copied</div>
+
+<script>
+const SCHEMES = {
+  analogous:     [-40, -20, 0, 20, 40],
+  complementary: [0, 0, 180, 180, 15],
+  triadic:       [0, 120, 240, 0, 120],
+  "split-complementary": [0, 150, 210, 0, 30],
+  monochrome:    [0, 0, 0, 0, 0],
+};
+const rand = (a, b) => a + Math.random() * (b - a);
+const colors = Array.from({ length: 5 }, () => ({ h: 0, s: 0, l: 0, locked: false }));
+const box = document.getElementById("swatches");
+
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const c = l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(c * 255).toString(16).padStart(2, "0");
+  };
+  return "#" + f(0) + f(8) + f(4);
+}
+
+function generate() {
+  const names = Object.keys(SCHEMES);
+  const name = names[Math.floor(Math.random() * names.length)];
+  const base = rand(0, 360);
+  const lights = [22, 38, 55, 72, 88].sort(() => Math.random() - 0.5);
+  SCHEMES[name].forEach((off, i) => {
+    const c = colors[i];
+    if (c.locked) return;
+    c.h = Math.round((base + off + rand(-6, 6) + 360) % 360);
+    c.s = Math.round(name === "monochrome" ? rand(35, 65) : rand(45, 85));
+    c.l = name === "monochrome" ? [20, 35, 50, 68, 85][i] : lights[i];
+  });
+  document.getElementById("scheme").textContent = name;
+  render();
+}
+
+function render() {
+  box.innerHTML = "";
+  colors.forEach((c, i) => {
+    const hex = hslToHex(c.h, c.s, c.l);
+    const el = document.createElement("div");
+    el.className = "swatch";
+    el.tabIndex = 0;
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-pressed", c.locked);
+    el.style.background = hex;
+    el.style.color = c.l > 60 ? "#16151b" : "#fbfaff";
+    el.innerHTML = `<span class="lock">${c.locked ? "Locked" : "Unlocked"}</span>
+      <button class="hex" type="button" title="Copy ${hex}">${hex}</button>
+      <span class="hsl">hsl(${c.h} ${c.s}% ${c.l}%)</span>`;
+    const toggle = () => { c.locked = !c.locked; render(); box.children[i].focus(); };
+    el.addEventListener("click", toggle);
+    el.addEventListener("keydown", e => { if (e.key === "Enter") toggle(); });
+    el.querySelector(".hex").addEventListener("click", e => { e.stopPropagation(); copy(hex); });
+    box.appendChild(el);
+  });
+}
+
+let toastTimer;
+async function copy(hex) {
+  const t = document.getElementById("toast");
+  try { await navigator.clipboard.writeText(hex); t.textContent = `Copied ${hex}`; }
+  catch { t.textContent = `${hex} (copy blocked, select it manually)`; }
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 1400);
+}
+
+document.getElementById("generate").addEventListener("click", generate);
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && !e.repeat) { e.preventDefault(); generate(); }
+});
+generate();
+</script>
